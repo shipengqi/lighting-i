@@ -1,8 +1,10 @@
 package cmd
 
 import (
+	"github.com/shipengqi/lighting-i/pkg/filelock"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
+	"os"
 )
 
 func uploadCommand() *cobra.Command {
@@ -10,8 +12,17 @@ func uploadCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:	"upload",
 		Short:	"Upload docker image.",
+		PreRun: func(cmd *cobra.Command, args []string) {
+			if !filelock.Lock(_defaultUploadLockFile) {
+				os.Exit(1)
+			}
+		},
 		Run: func(cmd *cobra.Command, args []string) {
-
+			defer func() {
+				if !filelock.UnLock(_defaultUploadLockFile) {
+					os.Exit(1)
+				}
+			}()
 		},
 	}
 	cmd.Flags().SortFlags = false

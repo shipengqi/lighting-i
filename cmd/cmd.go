@@ -7,6 +7,13 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var (
+	_defaultBaseDir = "/var/opt/lighting/"
+	_defaultImagesDir = _defaultBaseDir + "offline"
+	_defaultDownloadLockFile = _defaultBaseDir + ".download.lock"
+	_defaultUploadLockFile = _defaultBaseDir + ".upload.lock"
+)
+
 func NewLightingCommand() *cobra.Command {
 	lightingCmd := &cobra.Command{
 		Use:	"lighting",
@@ -31,4 +38,3 @@ func NewLightingCommand() *cobra.Command {
 	lightingCmd.AddCommand(uploadCommand())
 	return lightingCmd
 }
-

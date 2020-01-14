@@ -4,9 +4,11 @@ import (
 	"fmt"
 	"github.com/gosuri/uiprogress"
 	"github.com/gosuri/uiprogress/util/strutil"
+	"github.com/shipengqi/lighting-i/pkg/filelock"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"math/rand"
+	"os"
 	"sync"
 	"time"
 )
@@ -38,7 +40,17 @@ func downloadCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "download",
 		Short: "Download docker image.",
+		PreRun: func(cmd *cobra.Command, args []string) {
+			if !filelock.Lock(_defaultDownloadLockFile) {
+				os.Exit(1)
+			}
+		},
 		Run: func(cmd *cobra.Command, args []string) {
+			defer func() {
+				if !filelock.UnLock(_defaultUploadLockFile) {
+					os.Exit(1)
+				}
+			}()
 			fmt.Println("==============")
 			uiprogress.Start()
 
@@ -59,7 +71,7 @@ func downloadCommand() *cobra.Command {
 
 func addDownloadFlags(flagSet *pflag.FlagSet, cfg Config) {
 	flagSet.BoolVarP(&cfg.AutoConfirm, "yes", "y", false, "Answer yes for any confirmations.")
-	flagSet.StringVarP(&cfg.Dir, "dir", "d", "/var/opt/kubernetes/offline", "Images tar directory path.")
+	flagSet.StringVarP(&cfg.Dir, "dir", "d", _defaultImagesDir, "Images tar directory path.")
 	flagSet.StringVarP(&cfg.User, "user", "u", "", "Registry account username.")
 	flagSet.StringVarP(&cfg.Password, "pass", "p", "", "Registry account password.")
 	flagSet.StringVar(&cfg.Host, "host", "", "The host name of the registry.")
