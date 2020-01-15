@@ -1,6 +1,9 @@
 package filelock
 
-import "os"
+import (
+	"fmt"
+	"os"
+)
 
 func Check(name string) bool {
 	if _, err := os.Stat(name); err != nil {
@@ -15,16 +18,18 @@ func Lock(name string) bool {
 	if Check(name) {
 		return false
 	}
-	_, err := os.Create(name)
+	f, err := os.Create(name)
 	if err != nil {
 		return false
 	}
+	defer f.Close()
 	return true
 }
 
 func UnLock(name string) bool {
 	err := os.Remove(name)
 	if err != nil {
+		fmt.Println(err)
 		return false
 	}
 	return true

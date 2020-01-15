@@ -3,16 +3,26 @@ package images
 import (
 	"fmt"
 	"io/ioutil"
+	"strings"
 
 	"gopkg.in/yaml.v2"
 )
 
-type Images struct {
+var (
+	_defaultImageTag = "latest"
+)
+
+type ImageConf struct {
 	Images []string `yaml:"images"`
 }
 
-func GetImagesFromConfig(config string) (*Images, error) {
-	images := &Images{}
+type Image struct {
+	Name       string
+	Tag        string
+}
+
+func GetImagesFromConfig(config string) (*ImageConf, error) {
+	images := &ImageConf{}
 	data, err := ioutil.ReadFile(config)
 	if err != nil {
 		return nil, fmt.Errorf("read images config: %v", err)
@@ -24,10 +34,26 @@ func GetImagesFromConfig(config string) (*Images, error) {
 	return images, nil
 }
 
-func GetImageTag(image string) string {
-	return ""
+func ParseImage(image string) Image {
+	if len(image) < 1 {
+		return Image{}
+	}
+	name, tag := GetImageNameAndTag(image)
+	return Image{Name: name, Tag: tag}
 }
 
-func GetImageName(image string) string {
-	return ""
+func GetImageNameAndTag(image string) (string, string) {
+	if len(image) < 1 {
+		return "", ""
+	}
+	s := strings.Split(image, ":")
+	if len(s) < 1 {
+		return "", ""
+	}
+
+	if len(s) < 2 {
+		return s[0], _defaultImageTag
+	}
+
+	return s[0], s[1]
 }
