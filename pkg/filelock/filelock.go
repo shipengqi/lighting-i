@@ -14,23 +14,22 @@ func Check(name string) bool {
 	return true
 }
 
-func Lock(name string) bool {
+func Lock(name string) error {
 	if Check(name) {
-		return false
+		return fmt.Errorf("lock exists")
 	}
 	f, err := os.Create(name)
 	if err != nil {
-		return false
+		return err
 	}
 	defer f.Close()
-	return true
+	return nil
 }
 
-func UnLock(name string) bool {
+func UnLock(name string) error {
 	err := os.Remove(name)
 	if err != nil {
-		fmt.Println(err)
-		return false
+		return err
 	}
-	return true
+	return nil
 }

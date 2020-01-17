@@ -6,15 +6,15 @@ func TestLock(t *testing.T) {
 	lockfile := "test.lock"
 	UnLock(lockfile)
 	t.Run("Lock success", func(t *testing.T) {
-		result := Lock(lockfile)
-		if !result {
+		err := Lock(lockfile)
+		if err != nil {
 			t.Fatal("Wanted true, got false")
 		}
 	})
 
 	t.Run("Lock failed", func(t *testing.T) {
-		result := Lock(lockfile)
-		if result {
+		err := Lock(lockfile)
+		if err == nil {
 			t.Fatal("Wanted false, got true")
 		}
 	})
@@ -25,15 +25,15 @@ func TestLock(t *testing.T) {
 func TestUnLock(t *testing.T) {
 	lockfile := "test.lock"
 	t.Run("UnLock success", func(t *testing.T) {
-		result := UnLock(lockfile)
-		if !result {
+		err := UnLock(lockfile)
+		if err != nil {
 			t.Fatal("Wanted true, got false")
 		}
 	})
 
 	t.Run("UnLock failed", func(t *testing.T) {
-		result := UnLock(lockfile)
-		if result {
+		err := UnLock(lockfile)
+		if err == nil {
 			t.Fatal("Wanted false, got true")
 		}
 	})

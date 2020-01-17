@@ -1,6 +1,8 @@
 package main
 
-import "github.com/shipengqi/lighting-i/cmd"
+import (
+	"github.com/shipengqi/lighting-i/cmd"
+)
 
 func main()  {
 	rootCmd := cmd.NewLightingCommand()

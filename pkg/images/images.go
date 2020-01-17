@@ -10,36 +10,42 @@ import (
 
 var (
 	_defaultImageTag = "latest"
+	_defaultOrgName  = "library"
 )
 
-type ImageConf struct {
-	Images []string `yaml:"images"`
+type ImageSet struct {
+	OrgName string   `yaml:"org_name"`
+	Version string   `yaml:"version"`
+	Images  []string `yaml:"images"`
 }
 
 type Image struct {
-	Name       string
-	Tag        string
+	Name string
+	Tag  string
 }
 
-func GetImagesFromConfig(config string) (*ImageConf, error) {
-	images := &ImageConf{}
-	data, err := ioutil.ReadFile(config)
+func GetImagesFromSet(set string) (*ImageSet, error) {
+	imageSet := &ImageSet{}
+	data, err := ioutil.ReadFile(set)
 	if err != nil {
-		return nil, fmt.Errorf("read images config: %v", err)
+		return nil, fmt.Errorf("read images set: %v", err)
 	}
-	err = yaml.Unmarshal(data, images)
+	err = yaml.Unmarshal(data, imageSet)
 	if err != nil {
 		return nil, fmt.Errorf("yaml unmarshal: %v", err)
 	}
-	return images, nil
+	return imageSet, nil
 }
 
-func ParseImage(image string) Image {
+func ParseImage(image, org string) Image {
 	if len(image) < 1 {
 		return Image{}
 	}
 	name, tag := GetImageNameAndTag(image)
-	return Image{Name: name, Tag: tag}
+	if org == "" {
+		org = _defaultOrgName
+	}
+	return Image{Name: fmt.Sprintf("%s/%s", org, name), Tag: tag}
 }
 
 func GetImageNameAndTag(image string) (string, string) {
