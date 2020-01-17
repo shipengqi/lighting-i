@@ -10,25 +10,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/shipengqi/lighting-i/pkg/docker/registry/client"
-	"github.com/shipengqi/lighting-i/pkg/filelock"
-	"github.com/shipengqi/lighting-i/pkg/images"
-
     "github.com/gosuri/uiprogress"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
-)
 
-type DownloadConfig struct {
-	AutoConfirm bool
-	Dir         string
-	ImagesSet   string
-	User        string
-	Password    string
-	RetryTimes  int
-	Registry    string
-	Key         string
-}
+	"github.com/shipengqi/lighting-i/pkg/docker/registry/client"
+	"github.com/shipengqi/lighting-i/pkg/filelock"
+	"github.com/shipengqi/lighting-i/pkg/images"
+)
 
 type ManifestRes struct {
 	OK        bool
@@ -45,49 +34,30 @@ type LayerRes struct {
 	ImageTag  string
 }
 
-var imageFolderPath string
 
-func addDownloadFlags(flagSet *pflag.FlagSet, conf *DownloadConfig) {
-	flagSet.StringVarP(&conf.Registry, "registry", "r", "https://registry-1.docker.io", "The host of the registry.")
-	flagSet.StringVarP(&conf.User, "user", "u", "", "Registry account username.")
-	flagSet.StringVarP(&conf.Password, "pass", "p", "", "Registry account password.")
-	flagSet.StringVar(&conf.Key, "key", "", "Key file registry account.")
-	flagSet.IntVarP(&conf.RetryTimes, "retry", "t", 0, "The retry times when the image download fails.")
-	flagSet.StringVarP(&conf.ImagesSet, "image-set", "i", _defaultImageSet, "Images set file path.")
-	flagSet.StringVarP(&conf.Dir, "dir", "d", _defaultImagesDir, "Images tar directory path.")
-	flagSet.BoolVarP(&conf.AutoConfirm, "yes", "y", false, "Answer yes for any confirmations.")
+
+func addDownloadFlags(flagSet *pflag.FlagSet) {
+	flagSet.StringVarP(&Conf.ImagesSet, "image-set", "i", _defaultImageSet, "Images set file path.")
 }
 
 func downloadCommand() *cobra.Command {
-	var conf = &DownloadConfig{}
 	cmd := &cobra.Command{
 		Use:   "download",
 		Short: "Download docker images.",
-		PreRun: func(cmd *cobra.Command, args []string) {
-			// Create required dir and create download directory by date
-			folderPath, err := createDir(conf.Dir)
-			if err != nil {
-				fmt.Printf("mkdir %v", err)
-				os.Exit(1)
-			}
-			imageFolderPath = folderPath
-
-			if err := filelock.Lock(_defaultDownloadLockFile); err != nil {
-				fmt.Println("Error: one instance is already running and only one instance is allowed at a time.")
-				fmt.Println("Check to see if another instance is running.")
-				fmt.Printf("If the instance stops running, delete %s file.\n", _defaultDownloadLockFile)
-				os.Exit(1)
-			}
-		},
 		Run: func(cmd *cobra.Command, args []string) {
 			defer filelock.UnLock(_defaultDownloadLockFile)
-			c := client.New(conf.User, conf.Password, conf.Registry)
-			// Ping get registry auth info
+			c := client.New()
+			c.SetHostURL(Conf.Registry)
+			c.SetSecureSkip(true)
+			c.SetUsername(Conf.User)
+			c.SetPassword(Conf.Password)
+
 			if err := c.Ping(); err != nil {
 				fmt.Printf("ping registry %v.\n", err)
 				return
 			}
-			imageSet, err := images.GetImagesFromSet(conf.ImagesSet)
+
+			imageSet, err := images.GetImagesFromSet(Conf.ImagesSet)
 			if err != nil {
 				fmt.Printf("get images %v.\n", err)
 				return
@@ -98,11 +68,13 @@ func downloadCommand() *cobra.Command {
 				fmt.Printf("manifest unmarshal %v.\n", err)
 				return
 			}
-			err = ioutil.WriteFile(filepath.Join(imageFolderPath, _defaultManifestJson), j, 777)
+			err = ioutil.WriteFile(filepath.Join(ImageDateFolderPath, _defaultManifestJson), j, 777)
 			if err != nil {
 				fmt.Printf("write manifest %v.\n", err)
 				return
 			}
+
+
 			fmt.Println("start download images.")
 			downloadc := make(chan int, 1)
 			downloadCount := len(allManifest)
@@ -123,7 +95,7 @@ func downloadCommand() *cobra.Command {
 				case <-downloadc:
 					downloadCount --
 					if downloadCount <= 0 {
-						fmt.Println("download successfully.")
+						fmt.Println("Download successfully.")
 						filelock.UnLock(_defaultDownloadLockFile)
 						os.Exit(0)
 					}
@@ -137,9 +109,14 @@ func downloadCommand() *cobra.Command {
 		},
 	}
 	cmd.Flags().SortFlags = false
-	addDownloadFlags(cmd.Flags(), conf)
+	addDownloadFlags(cmd.Flags())
 	return cmd
 }
+
+func calculateRequiredLayers() {
+
+}
+
 
 func getAllManifest(c *client.Client, imageSet *images.ImageSet) []ManifestRes {
 	var wg sync.WaitGroup
@@ -150,21 +127,6 @@ func getAllManifest(c *client.Client, imageSet *images.ImageSet) []ManifestRes {
 			defer wg.Done()
 			img := images.ParseImage(i, imageSet.OrgName)
 			manifest, err := c.GetManifest(img.Name, img.Tag)
-			if err != nil {
-				manifests = append(manifests, ManifestRes{
-					OK:        false,
-					Message:   err.Error(),
-					ImageName: img.Name,
-					ImageTag: img.Tag,
-				})
-			} else {
-				manifests = append(manifests, ManifestRes{
-					OK:        true,
-					ImageName: img.Name,
-					ImageTag: img.Tag,
-					Manifest:  manifest,
-				})
-			}
 		}(i)
 	}
 	wg.Wait()
@@ -181,8 +143,8 @@ func getLayersByImageRepo(c *client.Client, mr ManifestRes, downloadc chan int, 
 	for _, l := range mr.Manifest.Layers {
 		go func(l client.Layer) {
 			defer wg.Done()
-			o := fmt.Sprintf("%s/%s.tar.gz", imageFolderPath, strings.Split(l.Digest, ":")[1])
-			err := c.GetLayerBlobs(mr.ImageName, l.Digest, o)
+			o := fmt.Sprintf("%s/%s.tar.gz", ImageDateFolderPath, strings.Split(l.Digest, ":")[1])
+			err := c.GetBlobs(mr.ImageName, l.Digest, o)
 			if err != nil {
 				layers = append(layers, LayerRes{
 					OK:        false,
@@ -203,13 +165,4 @@ func getLayersByImageRepo(c *client.Client, mr ManifestRes, downloadc chan int, 
 	wg.Wait()
 	downloadc <- 1
 	return layers
-}
-
-
-func createDir(dirPath string) (string, error) {
-	folderPath := filepath.Join(dirPath, time.Now().Format("20060102"))
-	if err := os.MkdirAll(folderPath, 777); err != nil {
-		return "", err
-	}
-	return folderPath, nil
 }

@@ -7,11 +7,17 @@ type AuthToken struct {
 	IssuedAt    string `json:"issued_at"`
 }
 
+type ImageRepo struct {
+	Name string
+	Tag  string
+}
+
 type Manifest struct {
-	SchemaVersion int            `json:"schemaVersion"`
-	MediaType     string         `json:"mediaType"`
-	Config        ManifestConfig `json:"config"`
-	Layers        []Layer        `json:"layers"`
+	SchemaVersion int     `json:"schemaVersion"`
+	MediaType     string  `json:"mediaType"`
+	Config        Layer   `json:"config"`
+	Layers        []Layer `json:"layers"`
+	Image         ImageRepo
 }
 
 type Layer struct {
@@ -20,4 +26,13 @@ type Layer struct {
 	Digest    string `json:"digest"`
 }
 
-type ManifestConfig Layer
+type ManifestResponse struct {
+	Status    int
+	Message   string
+	Manifest  *Manifest
+}
+
+type BlobsResponse struct {
+	Status    int
+	Message   string
+}

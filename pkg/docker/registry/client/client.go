@@ -4,8 +4,10 @@ import (
 	"crypto/tls"
 	"encoding/base64"
 	"fmt"
-	"github.com/go-resty/resty/v2"
 	"strings"
+	"sync"
+
+	"github.com/go-resty/resty/v2"
 )
 
 var (
@@ -26,80 +28,25 @@ type Client struct {
 	}
 }
 
-func New(username, password, registry string) *Client {
-	c := &Client{Client: resty.New()}
+func New() *Client {
+	return &Client{Client: resty.New()}
+}
+
+func (c *Client) SetUsername(username string)  {
 	c.username = username
+}
+
+func (c *Client) SetPassword(password string) {
 	c.password = password
-	c.SetHostURL(registry)
-	c.SetTLSClientConfig(&tls.Config{InsecureSkipVerify: true})
-	return c
 }
 
-func (c *Client) GetAuthToken(repo string) error {
-	if c.auth.mode == BearerAuthType {
-		authToken := &AuthToken{}
-		request := c.R()
-		if c.username != "" && c.password != "" {
-			request = request.SetBasicAuth(c.username, c.password)
-		}
-		_, err := request.
-			SetResult(authToken).
-			SetQueryParam("service", c.auth.service).
-			SetQueryParam("scope", fmt.Sprintf("repository:%s:pull", repo)).
-			Get(c.auth.server)
-		if err != nil {
-			return err
-		}
-		if authToken.Token == "" {
-			return fmt.Errorf("token is null")
-		}
-		c.auth.token = authToken.Token
-		return nil
+func (c *Client) SetSecureSkip(skip bool) {
+	if skip {
+		c.SetTLSClientConfig(&tls.Config{InsecureSkipVerify: true})
 	}
-
-	if c.auth.mode == BasicAuthType {
-		if c.username == "" || c.password == "" {
-			return fmt.Errorf("bad credential")
-		}
-		c.auth.token = base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf("%s:%s", c.username, c.password)))
-		return nil
-	}
-
-	return fmt.Errorf("upsupport auth type %s", c.auth.mode)
 }
 
-func (c *Client) GetManifest(name, reference string) (*Manifest, error) {
-	manifest := &Manifest{}
-	if err := c.GetAuthToken(name); err != nil {
-		return nil, err
-	}
-	request := c.R()
-	_, err := request.
-		SetHeader("accept", "application/vnd.docker.distribution.manifest.v2+json").
-		SetAuthToken(c.auth.token).
-		SetResult(manifest).
-		Get(fmt.Sprintf("/v2/%s/manifests/%s", name, reference))
-	if err != nil {
-		return nil, err
-	}
-	return manifest, nil
-}
-
-func (c *Client) GetLayerBlobs(name, digest, output string) error {
-	if err := c.GetAuthToken(name); err != nil {
-		return err
-	}
-	request := c.R()
-	_, err := request.
-		SetAuthToken(c.auth.token).
-		SetOutput(output).
-		Get(fmt.Sprintf("/v2/%s/blobs/%s", name, digest))
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
+// Ping ping registry and get authenticate info
 func (c *Client) Ping() error {
 	res, err := c.R().
 		Get("/v2/")
@@ -140,6 +87,91 @@ func (c *Client) Ping() error {
 			}
 		}
 	}
-	fmt.Printf("%s auth server: %s, service: %s.\n", c.auth.mode, c.auth.server, c.auth.service)
+	return nil
+}
+
+// GetAuthToken get token with scope
+func (c *Client) GetAuthToken(repo string) error {
+	if c.auth.mode == BearerAuthType {
+		authToken := &AuthToken{}
+		request := c.R()
+		if c.username != "" && c.password != "" {
+			request = request.SetBasicAuth(c.username, c.password)
+		}
+		_, err := request.
+			SetResult(authToken).
+			SetQueryParam("service", c.auth.service).
+			SetQueryParam("scope", fmt.Sprintf("repository:%s:pull", repo)).
+			Get(c.auth.server)
+		if err != nil {
+			return err
+		}
+		if authToken.Token == "" {
+			return fmt.Errorf("token is null")
+		}
+		c.auth.token = authToken.Token
+		return nil
+	}
+
+	if c.auth.mode == BasicAuthType {
+		if c.username == "" || c.password == "" {
+			return fmt.Errorf("bad credential")
+		}
+		c.auth.token = base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf("%s:%s", c.username, c.password)))
+		return nil
+	}
+
+	return fmt.Errorf("upsupport auth type %s", c.auth.mode)
+}
+
+// GetManifest get manifest of image
+func (c *Client) GetManifest(name, reference string) (*Manifest, error) {
+	manifest := &Manifest{Image: ImageRepo{name, reference}}
+	if err := c.GetAuthToken(name); err != nil {
+		return nil, err
+	}
+	request := c.R()
+	_, err := request.
+		SetHeader("accept", "application/vnd.docker.distribution.manifest.v2+json").
+		SetAuthToken(c.auth.token).
+		SetResult(manifest).
+		Get(fmt.Sprintf("/v2/%s/manifests/%s", name, reference))
+	if err != nil {
+		return nil, err
+	}
+
+	return manifest, nil
+}
+
+// GetLayerBlobs get blobs of image layer digest
+func (c *Client) GetBlobs(name, digest, output string) error {
+	if err := c.GetAuthToken(name); err != nil {
+		return err
+	}
+	request := c.R()
+	_, err := request.
+		SetAuthToken(c.auth.token).
+		SetOutput(output).
+		Get(fmt.Sprintf("/v2/%s/blobs/%s", name, digest))
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (c *Client) GetLayersOfManifest(m Manifest) error {
+	if len(m.Layers) < 1 {
+		return nil
+	}
+	var wg sync.WaitGroup
+	wg.Add(len(m.Layers))
+	for _, l := range m.Layers {
+		go func(l Layer) {
+			defer wg.Done()
+			o := fmt.Sprintf("%s/%s.tar.gz", ImageDateFolderPath, strings.Split(l.Digest, ":")[1])
+			err := c.GetBlobs(mr.ImageName, l.Digest, o)
+		}(l)
+	}
+	wg.Wait()
 	return nil
 }
