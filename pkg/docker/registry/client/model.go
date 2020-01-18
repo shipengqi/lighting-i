@@ -25,14 +25,3 @@ type Layer struct {
 	Size      int    `json:"size"`
 	Digest    string `json:"digest"`
 }
-
-type ManifestResponse struct {
-	Status    int
-	Message   string
-	Manifest  *Manifest
-}
-
-type BlobsResponse struct {
-	Status    int
-	Message   string
-}

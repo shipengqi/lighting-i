@@ -4,15 +4,24 @@ import (
 	"crypto/tls"
 	"encoding/base64"
 	"fmt"
-	"strings"
-	"sync"
-
 	"github.com/go-resty/resty/v2"
+	"strings"
 )
 
 var (
 	BasicAuthType  = "Basic"
 	BearerAuthType = "Bearer"
+)
+
+var (
+	// Common errors
+	OK                = &Errno{Code: 200, Message: "OK"}
+	BadRequestErr     = &Errno{Code: 400, Message: "Bad Request"}
+	UnauthorizedErr   = &Errno{Code: 401, Message: "Unauthorized."}
+	ForbiddenErr      = &Errno{Code: 403, Message: "Forbidden."}
+	NotFoundErr       = &Errno{Code: 404, Message: "Not Found."}
+	TooManyRequestErr = &Errno{Code: 429, Message: "Too Many Requests"}
+	InternalServerErr = &Errno{Code: 500, Message: "Internal server error"}
 )
 
 type Client struct {
@@ -32,7 +41,7 @@ func New() *Client {
 	return &Client{Client: resty.New()}
 }
 
-func (c *Client) SetUsername(username string)  {
+func (c *Client) SetUsername(username string) {
 	c.username = username
 }
 
@@ -126,52 +135,56 @@ func (c *Client) GetAuthToken(repo string) error {
 
 // GetManifest get manifest of image
 func (c *Client) GetManifest(name, reference string) (*Manifest, error) {
-	manifest := &Manifest{Image: ImageRepo{name, reference}}
+	manifest := &Manifest{Image: ImageRepo{Name: name, Tag: reference}}
 	if err := c.GetAuthToken(name); err != nil {
-		return nil, err
+		return manifest, Errno{InternalServerErr.Code, err.Error()}
 	}
 	request := c.R()
-	_, err := request.
+	res, err := request.
 		SetHeader("accept", "application/vnd.docker.distribution.manifest.v2+json").
 		SetAuthToken(c.auth.token).
 		SetResult(manifest).
 		Get(fmt.Sprintf("/v2/%s/manifests/%s", name, reference))
 	if err != nil {
-		return nil, err
+		return manifest, Errno{InternalServerErr.Code, err.Error()}
 	}
-
-	return manifest, nil
+	status := handleResponseStatus(res)
+	return manifest, status
 }
 
 // GetLayerBlobs get blobs of image layer digest
 func (c *Client) GetBlobs(name, digest, output string) error {
 	if err := c.GetAuthToken(name); err != nil {
-		return err
+		return Errno{InternalServerErr.Code, err.Error()}
 	}
 	request := c.R()
-	_, err := request.
+	res, err := request.
 		SetAuthToken(c.auth.token).
 		SetOutput(output).
 		Get(fmt.Sprintf("/v2/%s/blobs/%s", name, digest))
 	if err != nil {
-		return err
+		return Errno{InternalServerErr.Code, err.Error()}
 	}
-	return nil
+	status := handleResponseStatus(res)
+	return status
 }
 
-func (c *Client) GetLayersOfManifest(m Manifest) error {
-	if len(m.Layers) < 1 {
-		return nil
+
+func handleResponseStatus(res *resty.Response) *Errno {
+	if res == nil {
+		return InternalServerErr
 	}
-	var wg sync.WaitGroup
-	wg.Add(len(m.Layers))
-	for _, l := range m.Layers {
-		go func(l Layer) {
-			defer wg.Done()
-			o := fmt.Sprintf("%s/%s.tar.gz", ImageDateFolderPath, strings.Split(l.Digest, ":")[1])
-			err := c.GetBlobs(mr.ImageName, l.Digest, o)
-		}(l)
+	switch res.StatusCode() {
+	case BadRequestErr.Code:
+		return BadRequestErr
+	case UnauthorizedErr.Code:
+		return BadRequestErr
+	case ForbiddenErr.Code:
+		return BadRequestErr
+	case NotFoundErr.Code:
+		return BadRequestErr
+	case TooManyRequestErr.Code:
+		return BadRequestErr
 	}
-	wg.Wait()
 	return nil
 }

@@ -127,6 +127,21 @@ func getAllManifest(c *client.Client, imageSet *images.ImageSet) []ManifestRes {
 			defer wg.Done()
 			img := images.ParseImage(i, imageSet.OrgName)
 			manifest, err := c.GetManifest(img.Name, img.Tag)
+			if err != nil {
+				manifests = append(manifests, ManifestRes{
+					OK:        false,
+					Message:   err.Error(),
+					ImageName: img.Name,
+					ImageTag: img.Tag,
+				})
+			} else {
+				manifests = append(manifests, ManifestRes{
+					OK:        true,
+					ImageName: img.Name,
+					ImageTag: img.Tag,
+					Manifest:  manifest,
+				})
+			}
 		}(i)
 	}
 	wg.Wait()
