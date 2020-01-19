@@ -58,6 +58,8 @@ func downloadCommand() *cobra.Command {
 			c.SetSecureSkip(true)
 			c.SetUsername(Conf.User)
 			c.SetPassword(Conf.Password)
+			c.SetRetryCount(Conf.RetryTimes)
+			c.SetRetryMaxWaitTime(time.Second * 5)
 
 			if err := c.Ping(); err != nil {
 				fmt.Printf("ping registry %v.\n", err)
@@ -147,6 +149,7 @@ func downloadImages(manifests []ManifestResponse, required *sync.Map, completedc
 		}(m, bar)
 	}
 	wg.Wait()
+	uiprogress.Stop()
 	completedc <- 1
 }
 
@@ -193,7 +196,7 @@ func fetchBlobsInManifest(mr ManifestResponse, required *sync.Map, bar *uiprogre
 
 func addProgressBar(total int, image client.ImageRepo) *uiprogress.Bar {
 	title := fmt.Sprintf("%s:%s", strings.Split(image.Name, "/")[1], image.Tag)
-	bar := uiprogress.AddBar(total).AppendCompleted().PrependElapsed()
+	bar := uiprogress.AddBar(total).AppendCompleted().AppendElapsed()
 	bar.Width = 50
 	// prepend the deploy step to the bar
 	bar.PrependFunc(func(b *uiprogress.Bar) string {
