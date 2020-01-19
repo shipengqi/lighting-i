@@ -3,15 +3,12 @@ package filelock
 import (
 	"fmt"
 	"os"
+
+	"github.com/shipengqi/lighting-i/pkg/utils"
 )
 
 func Check(name string) bool {
-	if _, err := os.Stat(name); err != nil {
-		if os.IsNotExist(err) {
-			return false
-		}
-	}
-	return true
+	return utils.PathIsExist(name)
 }
 
 func Lock(name string) error {

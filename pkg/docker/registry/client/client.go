@@ -133,11 +133,11 @@ func (c *Client) GetAuthToken(repo string) error {
 	return fmt.Errorf("upsupport auth type %s", c.auth.mode)
 }
 
-// GetManifest get manifest of image
-func (c *Client) GetManifest(name, reference string) (*Manifest, error) {
+// FetchManifest get manifest of image
+func (c *Client) FetchManifest(name, reference string) (*Manifest, *Errno) {
 	manifest := &Manifest{Image: ImageRepo{Name: name, Tag: reference}}
 	if err := c.GetAuthToken(name); err != nil {
-		return manifest, Errno{InternalServerErr.Code, err.Error()}
+		return manifest, &Errno{InternalServerErr.Code, err.Error()}
 	}
 	request := c.R()
 	res, err := request.
@@ -146,16 +146,16 @@ func (c *Client) GetManifest(name, reference string) (*Manifest, error) {
 		SetResult(manifest).
 		Get(fmt.Sprintf("/v2/%s/manifests/%s", name, reference))
 	if err != nil {
-		return manifest, Errno{InternalServerErr.Code, err.Error()}
+		return manifest, &Errno{InternalServerErr.Code, err.Error()}
 	}
 	status := handleResponseStatus(res)
 	return manifest, status
 }
 
-// GetLayerBlobs get blobs of image layer digest
-func (c *Client) GetBlobs(name, digest, output string) error {
+// FetchBlobs get blobs of image layer digest
+func (c *Client) FetchBlobs(name, digest, output string) *Errno {
 	if err := c.GetAuthToken(name); err != nil {
-		return Errno{InternalServerErr.Code, err.Error()}
+		return &Errno{InternalServerErr.Code, err.Error()}
 	}
 	request := c.R()
 	res, err := request.
@@ -163,7 +163,7 @@ func (c *Client) GetBlobs(name, digest, output string) error {
 		SetOutput(output).
 		Get(fmt.Sprintf("/v2/%s/blobs/%s", name, digest))
 	if err != nil {
-		return Errno{InternalServerErr.Code, err.Error()}
+		return &Errno{InternalServerErr.Code, err.Error()}
 	}
 	status := handleResponseStatus(res)
 	return status
@@ -186,5 +186,5 @@ func handleResponseStatus(res *resty.Response) *Errno {
 	case TooManyRequestErr.Code:
 		return BadRequestErr
 	}
-	return nil
+	return OK
 }

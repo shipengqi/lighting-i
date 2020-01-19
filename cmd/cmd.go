@@ -43,7 +43,6 @@ type Config struct {
 
 func addLightingFlags(flagSet *pflag.FlagSet) {
 	flagSet.StringVarP(&Conf.Registry, "registry", "r", "https://registry-1.docker.io", "The host of the registry.")
-	flagSet.StringVarP(&Conf.Org, "organization", "o", "", "Organization name of the images.")
 	flagSet.StringVarP(&Conf.User, "user", "u", "", "Registry account username.")
 	flagSet.StringVarP(&Conf.Password, "pass", "p", "", "Registry account password.")
 	flagSet.StringVar(&Conf.Key, "key", "", "Key file registry account.")
@@ -72,7 +71,7 @@ func NewLightingCommand() *cobra.Command {
 			}
 			ImageDateFolderPath = folderPath
 
-			if Conf.Force {
+			if Conf.Force || cmd.Name() == "lighting"{
 				return
 			}
 			lockName := _defaultDownloadLockFile
@@ -95,6 +94,7 @@ func NewLightingCommand() *cobra.Command {
 	cobra.EnableCommandSorting = false
 	// Reset Flags
 	lightingCmd.ResetFlags()
+	lightingCmd.PersistentFlags().SortFlags = false
 	addLightingFlags(lightingCmd.PersistentFlags())
 	// Add sub commands
 	lightingCmd.AddCommand(downloadCommand())
