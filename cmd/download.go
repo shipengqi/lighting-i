@@ -3,8 +3,6 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/gosuri/uiprogress/util/strutil"
-	"github.com/shipengqi/lighting-i/pkg/utils"
 	"io/ioutil"
 	"math"
 	"os"
@@ -14,12 +12,15 @@ import (
 	"time"
 
 	"github.com/gosuri/uiprogress"
+	"github.com/gosuri/uiprogress/util/strutil"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
 	"github.com/shipengqi/lighting-i/pkg/docker/registry/client"
 	"github.com/shipengqi/lighting-i/pkg/filelock"
 	"github.com/shipengqi/lighting-i/pkg/images"
+	"github.com/shipengqi/lighting-i/pkg/log"
+	"github.com/shipengqi/lighting-i/pkg/utils"
 )
 
 var c *client.Client
@@ -57,12 +58,12 @@ func addDownloadFlags(flagSet *pflag.FlagSet) {
 
 func downloadCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "download",
+		Use:   _defaultDownloadCommand,
 		Short: "Download docker images.",
 		Run: func(cmd *cobra.Command, args []string) {
 			defer filelock.UnLock(_defaultDownloadLockFile)
 			if !checkImageSet(Conf.ImagesSet) {
-				fmt.Printf("%s is not exists.\n", Conf.ImagesSet)
+				log.Errorf("%s is not exists.", Conf.ImagesSet)
 				return
 			}
 			c = client.New()
@@ -74,30 +75,32 @@ func downloadCommand() *cobra.Command {
 			c.SetRetryMaxWaitTime(time.Second * 5)
 
 			if err := c.Ping(); err != nil {
-				fmt.Printf("ping registry %v.\n", err)
+				log.Errorf("ping registry %v.", err)
 				return
 			}
 
 			imageSet, err := images.GetImagesFromSet(Conf.ImagesSet)
 			if err != nil {
-				fmt.Printf("get images %v.\n", err)
+				log.Errorf("get images %v.", err)
 				return
 			}
+			log.Debug("read image set", imageSet)
 			if imageSet.OrgName == "" {
 				imageSet.OrgName = "official library"
 			}
-			fmt.Printf("Starting the download of the %s ...\n", imageSet.OrgName)
+			log.Infof("Starting the download of the %s ...", imageSet.OrgName)
 
 			allManifest := fetchAllManifest(imageSet)
+			log.Debug("fetch manifest", allManifest)
 			err = generateManifestFile(allManifest)
 			if err != nil {
-				fmt.Printf("manifest file %v.\n", err)
+				log.Errorf("manifest file %v.", err)
 				return
 			}
 
 			required, total := calculateRequiredLayers(allManifest)
-			fmt.Println("Warning: Please make sure you have enough disk space for downloading images.")
-			fmt.Printf("Total size of the images: %d MB.\n", total)
+			log.Info("Warning: Please make sure you have enough disk space for downloading images.")
+			log.Infof("Total size of the images: %d MB.", total)
 
 			completedc := make(chan int, 1)
 			go downloadImages(allManifest, required, completedc)
@@ -107,7 +110,7 @@ func downloadCommand() *cobra.Command {
 			for {
 				select {
 				case <-completedc:
-					fmt.Println("Download successfully.")
+					log.Info("Download successfully.")
 					filelock.UnLock(_defaultDownloadLockFile)
 					os.Exit(0)
 				case code := <-exitc:
@@ -171,6 +174,7 @@ func fetchAllManifest(imageSet *images.ImageSet) []ManifestResponse {
 func downloadImages(manifests []ManifestResponse, required *sync.Map, completedc chan int) {
 	var wg sync.WaitGroup
 	var dms []*DownloadManifest
+	log.Debugf("download blobs with %d goroutines.", len(manifests))
 	wg.Add(len(manifests))
 	uiprogress.Start()
 	for _, m := range manifests {
@@ -182,9 +186,10 @@ func downloadImages(manifests []ManifestResponse, required *sync.Map, completedc
 		}(m, bar)
 	}
 	wg.Wait()
+	log.Debug("download blobs completed.")
 	err := generateDownloadManifest(dms)
 	if err != nil {
-		fmt.Printf("download manifest %v.\n", err)
+		log.Errorf("download manifest %v.", err)
 	}
 	uiprogress.Stop()
 	completedc <- 1
@@ -216,6 +221,7 @@ func fetchConfigOfManifest(mr ManifestResponse) (*client.Errno, string) {
 
 func fetchLayersOfManifest(mr ManifestResponse, required *sync.Map, bar *uiprogress.Bar) *DownloadManifest {
 	var wg sync.WaitGroup
+	log.Debugf("fetch config of manifest: %s:%s.", mr.Manifest.Image.Name, mr.Manifest.Image.Tag)
 	lm := &DownloadManifest{Image: mr.Manifest.Image}
 	err, conf := fetchConfigOfManifest(mr)
 	lm.Config = LayerResponse{err, conf}
@@ -231,6 +237,7 @@ func fetchLayersOfManifest(mr ManifestResponse, required *sync.Map, bar *uiprogr
 		wg.Add(1)
 		go func(l client.Layer, t string) {
 			defer wg.Done()
+			log.Debugf("fetch blobs %s of %s.", l.Digest, mr.Manifest.Image.Name)
 			err := c.FetchBlobs(mr.Manifest.Image.Name, l.Digest, t)
 			lm.Layers = append(lm.Layers, LayerResponse{err, t})
 			bar.Incr()

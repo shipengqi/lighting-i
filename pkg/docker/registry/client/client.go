@@ -4,8 +4,9 @@ import (
 	"crypto/tls"
 	"encoding/base64"
 	"fmt"
-	"github.com/go-resty/resty/v2"
 	"strings"
+
+	"github.com/go-resty/resty/v2"
 )
 
 var (

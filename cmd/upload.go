@@ -13,7 +13,7 @@ func addUploadFlags(flagSet *pflag.FlagSet) {
 
 func uploadCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:	"upload",
+		Use:	_defaultUploadCommand,
 		Short:	"Upload docker images.",
 		Run: func(cmd *cobra.Command, args []string) {
 			defer filelock.UnLock(_defaultUploadLockFile)
