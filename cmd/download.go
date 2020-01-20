@@ -24,6 +24,11 @@ import (
 
 var c *client.Client
 
+var (
+	_defaultProgressWidth      = 50
+	_defaultProgressTitleWidth = 30
+)
+
 type ManifestResponse struct {
 	Status   *client.Errno
 	Manifest *client.Manifest
@@ -31,12 +36,19 @@ type ManifestResponse struct {
 
 type LayerResponse struct {
 	Status *client.Errno
+	Target string
 }
 
 type RequiredLayer struct {
 	Fetched bool
 	Layer   client.Layer
 	Image   client.ImageRepo
+}
+
+type DownloadManifest struct {
+	Config LayerResponse
+	Layers []LayerResponse
+	Image  client.ImageRepo
 }
 
 func addDownloadFlags(flagSet *pflag.FlagSet) {
@@ -77,14 +89,9 @@ func downloadCommand() *cobra.Command {
 			fmt.Printf("Starting the download of the %s ...\n", imageSet.OrgName)
 
 			allManifest := fetchAllManifest(imageSet)
-			j, err := json.Marshal(allManifest)
+			err = generateManifestFile(allManifest)
 			if err != nil {
-				fmt.Printf("manifest unmarshal %v.\n", err)
-				return
-			}
-			err = ioutil.WriteFile(filepath.Join(ImageDateFolderPath, _defaultManifestJson), j, 777)
-			if err != nil {
-				fmt.Printf("write manifest %v.\n", err)
+				fmt.Printf("manifest file %v.\n", err)
 				return
 			}
 
@@ -121,6 +128,30 @@ func checkImageSet(name string) bool {
 	return utils.PathIsExist(name)
 }
 
+func generateManifestFile(manifests []ManifestResponse) error {
+	j, err := json.Marshal(manifests)
+	if err != nil {
+		return fmt.Errorf("unmarshal %v", err)
+	}
+	err = ioutil.WriteFile(filepath.Join(ImageDateFolderPath, _defaultManifestJson), j, 777)
+	if err != nil {
+		return fmt.Errorf("write %v", err)
+	}
+	return nil
+}
+
+func generateDownloadManifest(dms []*DownloadManifest) error {
+	j, err := json.Marshal(dms)
+	if err != nil {
+		return fmt.Errorf("unmarshal %v", err)
+	}
+	err = ioutil.WriteFile(filepath.Join(ImageDateFolderPath, _defaultDownloadManifest), j, 777)
+	if err != nil {
+		return fmt.Errorf("write %v", err)
+	}
+	return nil
+}
+
 func fetchAllManifest(imageSet *images.ImageSet) []ManifestResponse {
 	var wg sync.WaitGroup
 	var manifests []ManifestResponse
@@ -139,16 +170,22 @@ func fetchAllManifest(imageSet *images.ImageSet) []ManifestResponse {
 
 func downloadImages(manifests []ManifestResponse, required *sync.Map, completedc chan int) {
 	var wg sync.WaitGroup
+	var dms []*DownloadManifest
 	wg.Add(len(manifests))
 	uiprogress.Start()
 	for _, m := range manifests {
 		bar := addProgressBar(len(m.Manifest.Layers), m.Manifest.Image)
 		go func(m ManifestResponse, bar2 *uiprogress.Bar) {
 			defer wg.Done()
-			fetchBlobsInManifest(m, required, bar2)
+			dm := fetchLayersOfManifest(m, required, bar2)
+			dms = append(dms, dm)
 		}(m, bar)
 	}
 	wg.Wait()
+	err := generateDownloadManifest(dms)
+	if err != nil {
+		fmt.Printf("download manifest %v.\n", err)
+	}
 	uiprogress.Stop()
 	completedc <- 1
 }
@@ -171,36 +208,45 @@ func calculateRequiredLayers(manifests []ManifestResponse) (*sync.Map, int) {
 	return s, totalSize
 }
 
-func fetchBlobsInManifest(mr ManifestResponse, required *sync.Map, bar *uiprogress.Bar) []LayerResponse {
+func fetchConfigOfManifest(mr ManifestResponse) (*client.Errno, string) {
+	target := fmt.Sprintf("%s/%s.json", ImageDateFolderPath, strings.Split(mr.Manifest.Config.Digest, ":")[1])
+	err := c.FetchBlobs(mr.Manifest.Image.Name, mr.Manifest.Config.Digest, target)
+	return err, target
+}
+
+func fetchLayersOfManifest(mr ManifestResponse, required *sync.Map, bar *uiprogress.Bar) *DownloadManifest {
 	var wg sync.WaitGroup
-	var layers []LayerResponse
+	lm := &DownloadManifest{Image: mr.Manifest.Image}
+	err, conf := fetchConfigOfManifest(mr)
+	lm.Config = LayerResponse{err, conf}
 	for _, l := range mr.Manifest.Layers {
 		v, _ := required.Load(l.Digest)
 		s, _ := v.(RequiredLayer)
+		target := fmt.Sprintf("%s/%s.tar.gz", ImageDateFolderPath, strings.Split(l.Digest, ":")[1])
 		if s.Fetched == true {
+			lm.Layers = append(lm.Layers, LayerResponse{client.OK, target})
 			bar.Incr()
 			continue
 		}
 		wg.Add(1)
-		go func(l client.Layer) {
+		go func(l client.Layer, t string) {
 			defer wg.Done()
-			o := fmt.Sprintf("%s/%s.tar.gz", ImageDateFolderPath, strings.Split(l.Digest, ":")[1])
-			err := c.FetchBlobs(mr.Manifest.Image.Name, l.Digest, o)
-			layers = append(layers, LayerResponse{err})
+			err := c.FetchBlobs(mr.Manifest.Image.Name, l.Digest, t)
+			lm.Layers = append(lm.Layers, LayerResponse{err, t})
 			bar.Incr()
-		}(l)
+		}(l, target)
 	}
 	wg.Wait()
-	return layers
+	return lm
 }
 
 func addProgressBar(total int, image client.ImageRepo) *uiprogress.Bar {
 	title := fmt.Sprintf("%s:%s", strings.Split(image.Name, "/")[1], image.Tag)
 	bar := uiprogress.AddBar(total).AppendCompleted().AppendElapsed()
-	bar.Width = 50
+	bar.Width = _defaultProgressWidth
 	// prepend the deploy step to the bar
 	bar.PrependFunc(func(b *uiprogress.Bar) string {
-		return strutil.Resize(title, 22)
+		return strutil.Resize(title, uint(_defaultProgressTitleWidth))
 	})
 	return bar
 }

@@ -22,6 +22,7 @@ var (
 	_defaultDownloadLockFile = _defaultBaseDir + "/images.download.lock"
 	_defaultUploadLockFile   = _defaultBaseDir + "/images.upload.lock"
 	_defaultManifestJson     = "manifest.json"
+	_defaultDownloadManifest = "images.download.manifest"
 )
 
 var Conf Config
@@ -38,7 +39,7 @@ type Config struct {
 	Key         string
 	Force       bool
 
-	ImagesSet   string
+	ImagesSet string
 }
 
 func addLightingFlags(flagSet *pflag.FlagSet) {
@@ -51,7 +52,6 @@ func addLightingFlags(flagSet *pflag.FlagSet) {
 	flagSet.BoolVarP(&Conf.AutoConfirm, "yes", "y", false, "Answer yes for any confirmations.")
 	flagSet.BoolVarP(&Conf.Force, "force", "f", false, "If true, ignore the process lock.")
 }
-
 
 func NewLightingCommand() *cobra.Command {
 	lightingCmd := &cobra.Command{
@@ -71,7 +71,7 @@ func NewLightingCommand() *cobra.Command {
 			}
 			ImageDateFolderPath = folderPath
 
-			if Conf.Force || cmd.Name() == "lighting"{
+			if Conf.Force || cmd.Name() == "lighting" {
 				return
 			}
 			lockName := _defaultDownloadLockFile
@@ -102,13 +102,12 @@ func NewLightingCommand() *cobra.Command {
 	return lightingCmd
 }
 
-
 func handleSignals(exitCh chan int) {
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, syscall.SIGQUIT, syscall.SIGTERM, syscall.SIGINT)
 
 	for {
-		 s := <-c
+		s := <-c
 		switch s {
 		case syscall.SIGINT: // kill -SIGINT XXXX or Ctrl+c
 			fmt.Println("[SIGNAL] Catch SIGINT")
