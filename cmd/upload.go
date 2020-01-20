@@ -5,6 +5,7 @@ import (
 	"github.com/spf13/pflag"
 
 	"github.com/shipengqi/lighting-i/pkg/filelock"
+	"github.com/shipengqi/lighting-i/pkg/log"
 )
 
 func addUploadFlags(flagSet *pflag.FlagSet) {
@@ -16,7 +17,10 @@ func uploadCommand() *cobra.Command {
 		Use:	_defaultUploadCommand,
 		Short:	"Upload docker images.",
 		Run: func(cmd *cobra.Command, args []string) {
-			defer filelock.UnLock(_defaultUploadLockFile)
+			defer func() {
+				log.Infof("You can refer to %s for more detail.", LogFilePath)
+				filelock.UnLock(_defaultDownloadLockFile)
+			}()
 		},
 	}
 	cmd.Flags().SortFlags = false

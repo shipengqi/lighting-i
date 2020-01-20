@@ -61,7 +61,10 @@ func downloadCommand() *cobra.Command {
 		Use:   _defaultDownloadCommand,
 		Short: "Download docker images.",
 		Run: func(cmd *cobra.Command, args []string) {
-			defer filelock.UnLock(_defaultDownloadLockFile)
+			defer func() {
+				log.Infof("You can refer to %s for more detail.", LogFilePath)
+				filelock.UnLock(_defaultDownloadLockFile)
+			}()
 			if !checkImageSet(Conf.ImagesSet) {
 				log.Errorf("%s is not exists.", Conf.ImagesSet)
 				return
@@ -110,7 +113,8 @@ func downloadCommand() *cobra.Command {
 			for {
 				select {
 				case <-completedc:
-					log.Info("Download successfully.")
+					log.Infof("Successfully downloaded the images to %s.", ImageDateFolderPath)
+					log.Infof("You can refer to %s for more detail.", LogFilePath)
 					filelock.UnLock(_defaultDownloadLockFile)
 					os.Exit(0)
 				case code := <-exitc:

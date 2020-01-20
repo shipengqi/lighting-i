@@ -32,6 +32,7 @@ var (
 
 var Conf Config
 var ImageDateFolderPath string
+var LogFilePath string
 
 type Config struct {
 	AutoConfirm bool
@@ -64,8 +65,8 @@ func NewLightingCommand() *cobra.Command {
 				os.Exit(1)
 			}
 			ImageDateFolderPath = folderPath
-
-			log.Init(filepath.Join(ImageDateFolderPath, _defaultDownloadLog))
+			LogFilePath = filepath.Join(ImageDateFolderPath, _defaultDownloadLog)
+			log.Init(LogFilePath)
 
 			if Conf.Force || cmd.Name() == _defaultRootCommand {
 				return
