@@ -35,6 +35,12 @@ type ManifestResponse struct {
 	Manifest *client.Manifest
 }
 
+type ManifestCheckResult struct {
+	Required  *sync.Map
+	Failed    []ManifestResponse
+	TotalSize int
+}
+
 type LayerResponse struct {
 	Status *client.Errno
 	Target string
@@ -77,11 +83,12 @@ func downloadCommand() *cobra.Command {
 			c.SetRetryCount(Conf.RetryTimes)
 			c.SetRetryMaxWaitTime(time.Second * 5)
 
+			log.Infof("Ping %s ...", c.HostURL)
 			if err := c.Ping(); err != nil {
 				log.Errorf("ping registry %v.", err)
 				return
 			}
-
+			log.Infof("Ping %s OK", c.HostURL)
 			imageSet, err := images.GetImagesFromSet(Conf.ImagesSet)
 			if err != nil {
 				log.Errorf("get images %v.", err)
@@ -95,25 +102,34 @@ func downloadCommand() *cobra.Command {
 
 			allManifest := fetchAllManifest(imageSet)
 			log.Debug("fetch manifest", allManifest)
+			mcr := checkFetchManifestResult(allManifest)
+			if len(mcr.Failed) > 0 {
+				log.Errorf("Fetch images manifest with errors.")
+				return
+			}
 			err = generateManifestFile(allManifest)
 			if err != nil {
 				log.Errorf("manifest file %v.", err)
 				return
 			}
 
-			required, total := calculateRequiredLayers(allManifest)
 			log.Info("Warning: Please make sure you have enough disk space for downloading images.")
-			log.Infof("Total size of the images: %d MB.", total)
+			log.Infof("Total size of the images: %d MB.", mcr.TotalSize)
 
 			completedc := make(chan int, 1)
-			go downloadImages(allManifest, required, completedc)
+			go downloadImages(allManifest, mcr.Required, completedc)
 
 			exitc := make(chan int, 1)
 			go handleSignals(exitc)
 			for {
 				select {
-				case <-completedc:
-					log.Infof("Successfully downloaded the images to %s.", ImageDateFolderPath)
+				case ccode := <-completedc:
+					if ccode < 1 {
+						log.Infof("Successfully downloaded the images to %s.", ImageDateFolderPath)
+					} else {
+						log.Errorf("Download images with errors.")
+					}
+
 					log.Infof("You can refer to %s for more detail.", LogFilePath)
 					filelock.UnLock(_defaultDownloadLockFile)
 					os.Exit(0)
@@ -168,6 +184,7 @@ func fetchAllManifest(imageSet *images.ImageSet) []ManifestResponse {
 			defer wg.Done()
 			img := images.ParseImage(i, imageSet.OrgName)
 			manifest, err := c.FetchManifest(img.Name, img.Tag)
+			log.Debugf("fetch manifest: %s:%s, status: %d, %s.", img.Name, img.Tag, err.Code, err.Message)
 			manifests = append(manifests, ManifestResponse{err, manifest})
 		}(i)
 	}
@@ -196,38 +213,26 @@ func downloadImages(manifests []ManifestResponse, required *sync.Map, completedc
 		log.Errorf("download manifest %v.", err)
 	}
 	uiprogress.Stop()
-	completedc <- 1
-}
-
-func calculateRequiredLayers(manifests []ManifestResponse) (*sync.Map, int) {
-	s := new(sync.Map)
-	var totalSize int
-	for _, m := range manifests {
-		if m.Status.Code != client.OK.Code {
-			continue
-		}
-		if len(m.Manifest.Layers) < 1 {
-			continue
-		}
-		for _, l := range m.Manifest.Layers {
-			totalSize += int(math.Ceil(float64(l.Size / 1024 / 1024)))
-			s.LoadOrStore(l.Digest, RequiredLayer{false, l, m.Manifest.Image})
-		}
+	fbr := checkFetchBlobsResult(dms)
+	if fbr > 0 {
+		completedc <- 1
+		return
 	}
-	return s, totalSize
+	completedc <- 0
 }
 
-func fetchConfigOfManifest(mr ManifestResponse) (*client.Errno, string) {
+func fetchConfigOfManifest(mr ManifestResponse) (string, *client.Errno) {
 	target := fmt.Sprintf("%s/%s.json", ImageDateFolderPath, strings.Split(mr.Manifest.Config.Digest, ":")[1])
 	err := c.FetchBlobs(mr.Manifest.Image.Name, mr.Manifest.Config.Digest, target)
-	return err, target
+	return target, err
 }
 
 func fetchLayersOfManifest(mr ManifestResponse, required *sync.Map, bar *uiprogress.Bar) *DownloadManifest {
 	var wg sync.WaitGroup
 	log.Debugf("fetch config of manifest: %s:%s.", mr.Manifest.Image.Name, mr.Manifest.Image.Tag)
 	lm := &DownloadManifest{Image: mr.Manifest.Image}
-	err, conf := fetchConfigOfManifest(mr)
+	conf, err := fetchConfigOfManifest(mr)
+	log.Debugf("fetch config of manifest: %s:%s, status: %d, %s.", mr.Manifest.Image.Name, mr.Manifest.Image.Tag, err.Code, err.Message)
 	lm.Config = LayerResponse{err, conf}
 	for _, l := range mr.Manifest.Layers {
 		v, _ := required.Load(l.Digest)
@@ -241,14 +246,47 @@ func fetchLayersOfManifest(mr ManifestResponse, required *sync.Map, bar *uiprogr
 		wg.Add(1)
 		go func(l client.Layer, t string) {
 			defer wg.Done()
-			log.Debugf("fetch blobs %s of %s.", l.Digest, mr.Manifest.Image.Name)
 			err := c.FetchBlobs(mr.Manifest.Image.Name, l.Digest, t)
+			log.Debugf("fetch blobs %s of %s, status: %d, %s.", l.Digest, mr.Manifest.Image.Name, err.Code, err.Message)
 			lm.Layers = append(lm.Layers, LayerResponse{err, t})
 			bar.Incr()
 		}(l, target)
 	}
 	wg.Wait()
 	return lm
+}
+
+func checkFetchManifestResult(manifests []ManifestResponse) *ManifestCheckResult {
+	mcr := &ManifestCheckResult{Required: new(sync.Map)}
+	for _, m := range manifests {
+		if m.Status.Code != client.OK.Code {
+			mcr.Failed = append(mcr.Failed, m)
+			continue
+		}
+		if len(m.Manifest.Layers) < 1 {
+			continue
+		}
+		for _, l := range m.Manifest.Layers {
+			mcr.TotalSize += int(math.Ceil(float64(l.Size / 1024 / 1024)))
+			mcr.Required.LoadOrStore(l.Digest, RequiredLayer{false, l, m.Manifest.Image})
+		}
+	}
+	return mcr
+}
+
+func checkFetchBlobsResult(dms []*DownloadManifest) int {
+	var failed int
+	for _, m := range dms {
+		if len(m.Layers) < 1 {
+			continue
+		}
+		for _, l := range m.Layers {
+			if l.Status.Code != client.OK.Code {
+				failed ++
+			}
+		}
+	}
+	return failed
 }
 
 func addProgressBar(total int, image client.ImageRepo) *uiprogress.Bar {

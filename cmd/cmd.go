@@ -103,7 +103,6 @@ func addLightingFlags(flagSet *pflag.FlagSet) {
 	flagSet.StringVarP(&Conf.Registry, "registry", "r", "https://registry-1.docker.io", "The host of the registry.")
 	flagSet.StringVarP(&Conf.User, "user", "u", "", "Registry account username.")
 	flagSet.StringVarP(&Conf.Password, "pass", "p", "", "Registry account password.")
-	flagSet.StringVar(&Conf.Key, "key", "", "Key file registry account.")
 	flagSet.IntVarP(&Conf.RetryTimes, "retry", "t", 0, "The retry times when the image download fails.")
 	flagSet.StringVarP(&Conf.Dir, "dir", "d", _defaultImagesDir, "Images tar directory path.")
 	flagSet.BoolVarP(&Conf.AutoConfirm, "yes", "y", false, "Answer yes for any confirmations.")

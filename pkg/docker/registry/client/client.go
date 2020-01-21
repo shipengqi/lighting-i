@@ -64,12 +64,10 @@ func (c *Client) Ping() error {
 		return err
 	}
 	authenticate := res.Header().Get("Www-Authenticate")
-	fmt.Printf("ping %s ...\n", c.HostURL)
 	c.auth.mode = BasicAuthType
 	if strings.HasPrefix(authenticate, BearerAuthType) {
 		c.auth.mode = BearerAuthType
 	}
-	fmt.Printf("ping %s OK\n", c.HostURL)
 	authInfo := strings.Split(authenticate, " ")
 	if len(authInfo) < 1 {
 		return nil
