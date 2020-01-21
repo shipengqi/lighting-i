@@ -31,7 +31,6 @@ type Client struct {
 	username string
 	password string
 	auth     struct {
-		token   string
 		mode    string
 		server  string
 		service string
@@ -99,7 +98,7 @@ func (c *Client) Ping() error {
 }
 
 // GetAuthToken get token with scope
-func (c *Client) GetAuthToken(repo string) error {
+func (c *Client) GetAuthToken(repo string) (error, string) {
 	if c.auth.mode == BearerAuthType {
 		authToken := &AuthToken{}
 		request := c.R()
@@ -109,39 +108,38 @@ func (c *Client) GetAuthToken(repo string) error {
 		_, err := request.
 			SetResult(authToken).
 			SetQueryParam("service", c.auth.service).
-			SetQueryParam("scope", fmt.Sprintf("repository:%s:pull", repo)).
+			SetQueryParam("scope", fmt.Sprintf("repository:%s:push,pull", repo)).
 			Get(c.auth.server)
 		if err != nil {
-			return err
+			return err, ""
 		}
 		if authToken.Token == "" {
-			return fmt.Errorf("token is null")
+			return fmt.Errorf("token is null"), ""
 		}
-		c.auth.token = authToken.Token
-		return nil
+		return nil, authToken.Token
 	}
 
 	if c.auth.mode == BasicAuthType {
 		if c.username == "" || c.password == "" {
-			return fmt.Errorf("bad credential")
+			return fmt.Errorf("bad credential"), ""
 		}
-		c.auth.token = base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf("%s:%s", c.username, c.password)))
-		return nil
+		return nil, base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf("%s:%s", c.username, c.password)))
 	}
 
-	return fmt.Errorf("upsupport auth type %s", c.auth.mode)
+	return fmt.Errorf("upsupport auth type %s", c.auth.mode), ""
 }
 
 // FetchManifest get manifest of image
 func (c *Client) FetchManifest(name, reference string) (*Manifest, *Errno) {
 	manifest := &Manifest{Image: ImageRepo{Name: name, Tag: reference}}
-	if err := c.GetAuthToken(name); err != nil {
+	err, token := c.GetAuthToken(name)
+	if err != nil {
 		return manifest, &Errno{InternalServerErr.Code, err.Error()}
 	}
 	request := c.R()
 	res, err := request.
 		SetHeader("accept", "application/vnd.docker.distribution.manifest.v2+json").
-		SetAuthToken(c.auth.token).
+		SetAuthToken(token).
 		SetResult(manifest).
 		Get(fmt.Sprintf("/v2/%s/manifests/%s", name, reference))
 	if err != nil {
@@ -153,12 +151,13 @@ func (c *Client) FetchManifest(name, reference string) (*Manifest, *Errno) {
 
 // FetchBlobs get blobs of image layer digest
 func (c *Client) FetchBlobs(name, digest, output string) *Errno {
-	if err := c.GetAuthToken(name); err != nil {
+	err, token := c.GetAuthToken(name)
+	if err != nil {
 		return &Errno{InternalServerErr.Code, err.Error()}
 	}
 	request := c.R()
 	res, err := request.
-		SetAuthToken(c.auth.token).
+		SetAuthToken(token).
 		SetOutput(output).
 		Get(fmt.Sprintf("/v2/%s/blobs/%s", name, digest))
 	if err != nil {
@@ -168,6 +167,40 @@ func (c *Client) FetchBlobs(name, digest, output string) *Errno {
 	return status
 }
 
+// CheckBlobs check the existence of a layer
+func (c *Client) CheckBlobs(name, digest, output string) *Errno {
+	err, token := c.GetAuthToken(name)
+	if err != nil {
+		return &Errno{InternalServerErr.Code, err.Error()}
+	}
+	request := c.R()
+	res, err := request.
+		SetAuthToken(token).
+		Head(fmt.Sprintf("/v2/%s/blobs/%s", name, digest))
+	if err != nil {
+		return &Errno{InternalServerErr.Code, err.Error()}
+	}
+	status := handleResponseStatus(res)
+	return status
+}
+
+// PushBlobs upload a layer
+//func (c *Client) PushBlobs(name, digest, output string) *Errno {
+//	err, token := c.GetAuthToken(name)
+//	if err != nil {
+//		return &Errno{InternalServerErr.Code, err.Error()}
+//	}
+//	request := c.R()
+//	res, err := request.
+//		SetAuthToken(token).
+//		SetFile().
+//		Post(fmt.Sprintf("/v2/%s/blobs/uploads/%s", name, digest))
+//	if err != nil {
+//		return &Errno{InternalServerErr.Code, err.Error()}
+//	}
+//	status := handleResponseStatus(res)
+//	return status
+//}
 
 func handleResponseStatus(res *resty.Response) *Errno {
 	if res == nil {
