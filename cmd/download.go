@@ -59,12 +59,20 @@ type DownloadManifest struct {
 }
 
 func addDownloadFlags(flagSet *pflag.FlagSet) {
+	flagSet.StringVarP(&Conf.Registry, "registry", "r", "https://registry-1.docker.io", "The host of the registry.")
 	flagSet.StringVarP(&Conf.ImagesSet, "image-set", "i", _defaultImageSet, "Images set file path.")
+	flagSet.StringVarP(&Conf.User, "user", "u", "", "Registry account username.")
+	flagSet.StringVarP(&Conf.Password, "pass", "p", "", "Registry account password.")
+	flagSet.IntVarP(&Conf.RetryTimes, "retry", "t", 0, "The retry times when the image download fails.")
+	flagSet.StringVarP(&Conf.Dir, "dir", "d", _defaultImagesDir, "Images tar directory path.")
+	flagSet.BoolVarP(&Conf.AutoConfirm, "yes", "y", false, "Answer yes for any confirmations.")
+	flagSet.BoolVarP(&Conf.Force, "force", "f", false, "If true, ignore the process lock.")
 }
 
 func downloadCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   _defaultDownloadCommand,
+		Aliases: []string{_defaultDownloadAlias},
 		Short: "Download docker images.",
 		Run: func(cmd *cobra.Command, args []string) {
 			defer func() {
