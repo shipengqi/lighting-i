@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/shipengqi/lighting-i/pkg/docker/registry/client"
 	"github.com/shipengqi/lighting-i/pkg/filelock"
 	"github.com/shipengqi/lighting-i/pkg/log"
 	"github.com/spf13/cobra"
@@ -33,10 +34,10 @@ var (
 var Conf Config
 var ImageDateFolderPath string
 var LogFilePath string
+var c *client.Client
 
 type Config struct {
 	AutoConfirm bool
-	Org         string
 	Dir         string
 	User        string
 	Password    string
@@ -45,7 +46,8 @@ type Config struct {
 	Key         string
 	Force       bool
 
-	ImagesSet string
+	Org         string
+	ImagesSet   string
 }
 
 func NewLightingCommand() *cobra.Command {
@@ -121,6 +123,24 @@ func handleSignals(exitCh chan int) {
 			return
 		}
 	}
+}
+
+func initClient() error {
+	c = client.New()
+	c.SetHostURL(Conf.Registry)
+	c.SetSecureSkip(true)
+	c.SetUsername(Conf.User)
+	c.SetPassword(Conf.Password)
+	c.SetRetryCount(Conf.RetryTimes)
+	c.SetRetryMaxWaitTime(time.Second * 5)
+
+	log.Infof("Ping %s ...", c.HostURL)
+	if err := c.Ping(); err != nil {
+		log.Errorf("ping registry %v.", err)
+		return err
+	}
+	log.Infof("Ping %s OK", c.HostURL)
+	return nil
 }
 
 func initDir(dirPath string) (string, error) {

@@ -25,3 +25,8 @@ type Layer struct {
 	Size      int    `json:"size"`
 	Digest    string `json:"digest"`
 }
+
+type Tags struct {
+	Name string   `json:"name"`
+	Tags []string `json:"tags"`
+}

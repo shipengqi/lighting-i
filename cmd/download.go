@@ -23,8 +23,6 @@ import (
 	"github.com/shipengqi/lighting-i/pkg/utils"
 )
 
-var c *client.Client
-
 var (
 	_defaultProgressWidth      = 50
 	_defaultProgressTitleWidth = 30
@@ -83,20 +81,12 @@ func downloadCommand() *cobra.Command {
 				log.Errorf("%s is not exists.", Conf.ImagesSet)
 				return
 			}
-			c = client.New()
-			c.SetHostURL(Conf.Registry)
-			c.SetSecureSkip(true)
-			c.SetUsername(Conf.User)
-			c.SetPassword(Conf.Password)
-			c.SetRetryCount(Conf.RetryTimes)
-			c.SetRetryMaxWaitTime(time.Second * 5)
-
-			log.Infof("Ping %s ...", c.HostURL)
-			if err := c.Ping(); err != nil {
-				log.Errorf("ping registry %v.", err)
+			err := initClient()
+			if err != nil {
+				log.Errorf("init client %v.", err)
 				return
 			}
-			log.Infof("Ping %s OK", c.HostURL)
+
 			imageSet, err := images.GetImagesFromSet(Conf.ImagesSet)
 			if err != nil {
 				log.Errorf("get images %v.", err)
@@ -131,11 +121,11 @@ func downloadCommand() *cobra.Command {
 			go handleSignals(exitc)
 			for {
 				select {
-				case ccode := <-completedc:
-					if ccode < 1 {
+				case failc := <-completedc:
+					if failc < 1 {
 						log.Infof("Successfully downloaded the images to %s.", ImageDateFolderPath)
 					} else {
-						log.Errorf("Download images with errors.")
+						log.Errorf("Download images with %d error(s).", failc)
 					}
 
 					log.Infof("You can refer to %s for more detail.", LogFilePath)
@@ -222,11 +212,7 @@ func downloadImages(manifests []ManifestResponse, required *sync.Map, completedc
 	}
 	uiprogress.Stop()
 	fbr := checkFetchBlobsResult(dms)
-	if fbr > 0 {
-		completedc <- 1
-		return
-	}
-	completedc <- 0
+	completedc <- fbr
 }
 
 func fetchConfigOfManifest(mr ManifestResponse) (string, *client.Errno) {

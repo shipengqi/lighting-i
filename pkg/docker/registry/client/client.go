@@ -129,6 +129,25 @@ func (c *Client) GetAuthToken(repo string) (error, string) {
 	return fmt.Errorf("upsupport auth type %s", c.auth.mode), ""
 }
 
+// ListImageTags listing image tags
+func (c *Client) ListImageTags(name string) (*Tags, *Errno) {
+	tags := &Tags{}
+	err, token := c.GetAuthToken(name)
+	if err != nil {
+		return tags, &Errno{InternalServerErr.Code, err.Error()}
+	}
+	request := c.R()
+	res, err := request.
+		SetAuthToken(token).
+		SetResult(tags).
+		Get(fmt.Sprintf("/v2/%s/tags/list", name))
+	if err != nil {
+		return tags, &Errno{InternalServerErr.Code, err.Error()}
+	}
+	status := handleResponseStatus(res)
+	return tags, status
+}
+
 // FetchManifest get manifest of image
 func (c *Client) FetchManifest(name, reference string) (*Manifest, *Errno) {
 	manifest := &Manifest{Image: ImageRepo{Name: name, Tag: reference}}
