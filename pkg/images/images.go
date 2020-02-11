@@ -3,6 +3,7 @@ package images
 import (
 	"fmt"
 	"io/ioutil"
+	"regexp"
 	"strings"
 
 	"gopkg.in/yaml.v2"
@@ -62,4 +63,19 @@ func GetImageNameAndTag(image string) (string, string) {
 	}
 
 	return s[0], s[1]
+}
+
+func ReplaceImageOrg(name, org string) (string, error) {
+	if len(name) < 1 {
+		return "", nil
+	}
+	if len(org) < 1 {
+		return name, nil
+	}
+	r, err := regexp.Compile(".*/")
+	if err != nil {
+		return "", err
+	}
+	ns := r.ReplaceAllString(name, org + "/")
+	return ns, nil
 }
