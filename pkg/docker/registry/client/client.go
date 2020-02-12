@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"encoding/base64"
 	"fmt"
+	"io/ioutil"
 	"strings"
 
 	"github.com/go-resty/resty/v2"
@@ -12,6 +13,7 @@ import (
 var (
 	BasicAuthType  = "Basic"
 	BearerAuthType = "Bearer"
+	DockerUuidKey  =  "Docker-Upload-Uuid"
 )
 
 var (
@@ -187,7 +189,7 @@ func (c *Client) FetchBlobs(name, digest, output string) *Errno {
 }
 
 // CheckBlobs check the existence of a layer
-func (c *Client) CheckBlobs(name, digest, output string) *Errno {
+func (c *Client) CheckBlobs(name, digest string) *Errno {
 	err, token := c.GetAuthToken(name)
 	if err != nil {
 		return &Errno{InternalServerErr.Code, err.Error()}
@@ -203,23 +205,47 @@ func (c *Client) CheckBlobs(name, digest, output string) *Errno {
 	return status
 }
 
+// StartUpload starting an upload
+func (c *Client) StartUpload(name string) *Errno {
+	err, token := c.GetAuthToken(name)
+	if err != nil {
+		return &Errno{InternalServerErr.Code, err.Error()}
+	}
+	request := c.R()
+	res, err := request.
+		SetAuthToken(token).
+		Post(fmt.Sprintf("/v2/%s/blobs/uploads", name))
+	if err != nil {
+		return &Errno{InternalServerErr.Code, err.Error()}
+	}
+	status := handleResponseStatus(res)
+	// Set docker uuid
+	if status.Code == OK.Code {
+		status.Message = res.Header().Get(DockerUuidKey)
+	}
+	return status
+}
+
 // PushBlobs upload a layer
-//func (c *Client) PushBlobs(name, digest, output string) *Errno {
-//	err, token := c.GetAuthToken(name)
-//	if err != nil {
-//		return &Errno{InternalServerErr.Code, err.Error()}
-//	}
-//	request := c.R()
-//	res, err := request.
-//		SetAuthToken(token).
-//		SetFile().
-//		Post(fmt.Sprintf("/v2/%s/blobs/uploads/%s", name, digest))
-//	if err != nil {
-//		return &Errno{InternalServerErr.Code, err.Error()}
-//	}
-//	status := handleResponseStatus(res)
-//	return status
-//}
+func (c *Client) PushBlobs(name, uuid, digest, path string) *Errno {
+	err, token := c.GetAuthToken(name)
+	if err != nil {
+		return &Errno{InternalServerErr.Code, err.Error()}
+	}
+	fileBytes, _ := ioutil.ReadFile(path)
+	request := c.R()
+	res, err := request.
+		SetBody(fileBytes).
+		SetHeader("Content-Type", "application/octet-stream").
+		SetAuthToken(token).
+		SetContentLength(true).
+		Put(fmt.Sprintf("/v2/%s/blobs/uploads/%s?digest=%s", name, uuid, digest))
+	if err != nil {
+		return &Errno{InternalServerErr.Code, err.Error()}
+	}
+	status := handleResponseStatus(res)
+	return status
+}
 
 func handleResponseStatus(res *resty.Response) *Errno {
 	if res == nil {

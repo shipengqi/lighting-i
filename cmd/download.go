@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/gosuri/uiprogress"
-	"github.com/gosuri/uiprogress/util/strutil"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
@@ -41,6 +40,7 @@ type ManifestCheckResult struct {
 
 type LayerResponse struct {
 	Status *client.Errno
+	Digest string
 	Target string
 }
 
@@ -72,6 +72,28 @@ func downloadCommand() *cobra.Command {
 		Use:   _defaultDownloadCommand,
 		Aliases: []string{_defaultDownloadAlias},
 		Short: "Download docker images.",
+		PreRun: func(cmd *cobra.Command, args []string) {
+			// Create required dir and create download directory by date
+			folderPath, err := initDir(Conf.Dir)
+			if err != nil {
+				fmt.Printf("mkdir %v", err)
+				os.Exit(1)
+			}
+			ImageDateFolderPath = folderPath
+
+			LogFilePath = filepath.Join(ImageDateFolderPath, _defaultDownloadLog)
+			log.Init(LogFilePath)
+
+			if Conf.Force {
+				return
+			}
+
+			if err := filelock.Lock(_defaultDownloadLockFile); err != nil {
+				log.Error("One instance is already running and only one instance is allowed at a time.")
+				log.Error("Check to see if another instance is running.")
+				log.Fatalf("If the instance stops running, delete %s file.\n", _defaultDownloadLockFile)
+			}
+		},
 		Run: func(cmd *cobra.Command, args []string) {
 			defer func() {
 				log.Infof("You can refer to %s for more detail.", LogFilePath)
@@ -208,7 +230,7 @@ func downloadImages(manifests []ManifestResponse, required *sync.Map, completedc
 	log.Debug("download blobs completed.")
 	err := generateDownloadManifest(dms)
 	if err != nil {
-		log.Errorf("download manifest %v.", err)
+		log.Errorf("generate manifest %v.", err)
 	}
 	uiprogress.Stop()
 	fbr := checkFetchBlobsResult(dms)
@@ -227,13 +249,13 @@ func fetchLayersOfManifest(mr ManifestResponse, required *sync.Map, bar *uiprogr
 	lm := &DownloadManifest{Image: mr.Manifest.Image}
 	conf, err := fetchConfigOfManifest(mr)
 	log.Debugf("fetch config of manifest: %s:%s, status: %d, %s.", mr.Manifest.Image.Name, mr.Manifest.Image.Tag, err.Code, err.Message)
-	lm.Config = LayerResponse{err, conf}
+	lm.Config = LayerResponse{err, mr.Manifest.Config.Digest,conf}
 	for _, l := range mr.Manifest.Layers {
 		v, _ := required.Load(l.Digest)
 		s, _ := v.(RequiredLayer)
 		target := fmt.Sprintf("%s/%s.tar.gz", ImageDateFolderPath, strings.Split(l.Digest, ":")[1])
 		if s.Fetched == true {
-			lm.Layers = append(lm.Layers, LayerResponse{client.OK, target})
+			lm.Layers = append(lm.Layers, LayerResponse{client.OK, l.Digest, target})
 			bar.Incr()
 			continue
 		}
@@ -242,7 +264,7 @@ func fetchLayersOfManifest(mr ManifestResponse, required *sync.Map, bar *uiprogr
 			defer wg.Done()
 			err := c.FetchBlobs(mr.Manifest.Image.Name, l.Digest, t)
 			log.Debugf("fetch blobs %s of %s, status: %d, %s.", l.Digest, mr.Manifest.Image.Name, err.Code, err.Message)
-			lm.Layers = append(lm.Layers, LayerResponse{err, t})
+			lm.Layers = append(lm.Layers, LayerResponse{err, l.Digest, t})
 			bar.Incr()
 		}(l, target)
 	}
@@ -283,13 +305,4 @@ func checkFetchBlobsResult(dms []*DownloadManifest) int {
 	return failed
 }
 
-func addProgressBar(total int, image client.ImageRepo) *uiprogress.Bar {
-	title := fmt.Sprintf("%s:%s", strings.Split(image.Name, "/")[1], image.Tag)
-	bar := uiprogress.AddBar(total).AppendCompleted().AppendElapsed()
-	bar.Width = _defaultProgressWidth
-	// prepend the deploy step to the bar
-	bar.PrependFunc(func(b *uiprogress.Bar) string {
-		return strutil.Resize(title, uint(_defaultProgressTitleWidth))
-	})
-	return bar
-}
+

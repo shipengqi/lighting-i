@@ -9,10 +9,12 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/shipengqi/lighting-i/pkg/docker/registry/client"
-	"github.com/shipengqi/lighting-i/pkg/filelock"
-	"github.com/shipengqi/lighting-i/pkg/log"
+	"github.com/gosuri/uiprogress"
+	"github.com/gosuri/uiprogress/util/strutil"
 	"github.com/spf13/cobra"
+
+	"github.com/shipengqi/lighting-i/pkg/docker/registry/client"
+	"github.com/shipengqi/lighting-i/pkg/log"
 )
 
 var (
@@ -29,6 +31,7 @@ var (
 	_defaultManifestJson     = "manifest.json"
 	_defaultDownloadManifest = "images.download.manifest"
 	_defaultDownloadLog      = "images.download.log"
+	_defaultUploadLog        = "images.upload.log"
 )
 
 var Conf Config
@@ -48,6 +51,7 @@ type Config struct {
 
 	Org         string
 	ImagesSet   string
+	Overwrite   bool
 }
 
 func NewLightingCommand() *cobra.Command {
@@ -58,30 +62,6 @@ func NewLightingCommand() *cobra.Command {
 			if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 				_ = cmd.Help()
 				os.Exit(0)
-			}
-
-			// Create required dir and create download directory by date
-			folderPath, err := initDir(Conf.Dir)
-			if err != nil {
-				fmt.Printf("mkdir %v", err)
-				os.Exit(1)
-			}
-			ImageDateFolderPath = folderPath
-			LogFilePath = filepath.Join(ImageDateFolderPath, _defaultDownloadLog)
-			log.Init(LogFilePath)
-
-			if Conf.Force || cmd.Name() == _defaultRootCommand {
-				return
-			}
-			lockName := _defaultDownloadLockFile
-			if cmd.Name() == _defaultUploadCommand {
-				lockName = _defaultUploadLockFile
-			}
-
-			if err := filelock.Lock(lockName); err != nil {
-				log.Error("One instance is already running and only one instance is allowed at a time.")
-				log.Error("Check to see if another instance is running.")
-				log.Fatalf("If the instance stops running, delete %s file.\n", lockName)
 			}
 		},
 		Run: func(cmd *cobra.Command, args []string) {
@@ -149,4 +129,15 @@ func initDir(dirPath string) (string, error) {
 		return "", err
 	}
 	return folderPath, nil
+}
+
+func addProgressBar(total int, image client.ImageRepo) *uiprogress.Bar {
+	title := fmt.Sprintf("%s:%s", strings.Split(image.Name, "/")[1], image.Tag)
+	bar := uiprogress.AddBar(total).AppendCompleted().AppendElapsed()
+	bar.Width = _defaultProgressWidth
+	// prepend the deploy step to the bar
+	bar.PrependFunc(func(b *uiprogress.Bar) string {
+		return strutil.Resize(title, uint(_defaultProgressTitleWidth))
+	})
+	return bar
 }
