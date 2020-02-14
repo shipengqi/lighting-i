@@ -233,8 +233,8 @@ func downloadImages(manifests []ManifestResponse, required *sync.Map, completedc
 		log.Errorf("generate manifest %v.", err)
 	}
 	uiprogress.Stop()
-	fbr := checkFetchBlobsResult(dms)
-	completedc <- fbr
+	failed := checkFetchBlobsResult(dms)
+	completedc <- failed
 }
 
 func fetchConfigOfManifest(mr ManifestResponse) (string, *client.Errno) {

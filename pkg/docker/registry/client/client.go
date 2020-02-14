@@ -227,7 +227,7 @@ func (c *Client) StartUpload(name string) *Errno {
 }
 
 // PushBlobs upload a layer
-func (c *Client) PushBlobs(name, uuid, digest, path string) *Errno {
+func (c *Client) PushBlobs(name, digest, uuid, path string) *Errno {
 	err, token := c.GetAuthToken(name)
 	if err != nil {
 		return &Errno{InternalServerErr.Code, err.Error()}

@@ -30,6 +30,7 @@ var (
 	_defaultUploadLockFile   = _defaultBaseDir + "/images.upload.lock"
 	_defaultManifestJson     = "manifest.json"
 	_defaultDownloadManifest = "images.download.manifest"
+	_defaultUploadManifest   = "images.upload.manifest"
 	_defaultDownloadLog      = "images.download.log"
 	_defaultUploadLog        = "images.upload.log"
 )

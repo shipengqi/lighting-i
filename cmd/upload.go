@@ -3,17 +3,17 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/shipengqi/lighting-i/pkg/docker/registry/client"
 	"io/ioutil"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
+	"time"
 
 	"github.com/gosuri/uiprogress"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
+	"github.com/shipengqi/lighting-i/pkg/docker/registry/client"
 	"github.com/shipengqi/lighting-i/pkg/filelock"
 	"github.com/shipengqi/lighting-i/pkg/log"
 	"github.com/shipengqi/lighting-i/pkg/utils"
@@ -88,8 +88,33 @@ func uploadCommand() *cobra.Command {
 				log.Errorf("get manifest %v.", err)
 				return
 			}
-			log.Debug(dm)
-			
+			log.Debug("read download manifest", dm)
+			log.Infof("Starting the upload the images to %s under %s ...", Conf.Org, ImageDateFolderPath)
+
+			completedc := make(chan int, 1)
+			go uploadImages(dm, completedc)
+
+			exitc := make(chan int, 1)
+			go handleSignals(exitc)
+			for {
+				select {
+				case failed := <-completedc:
+					if failed < 1 {
+						log.Infof("Successfully upload the images to %s under %s .", Conf.Org, ImageDateFolderPath)
+					} else {
+						log.Errorf("Upload images with %d error(s).", failed)
+					}
+
+					log.Infof("You can refer to %s for more detail.", LogFilePath)
+					filelock.UnLock(_defaultUploadLockFile)
+					os.Exit(0)
+				case code := <-exitc:
+					filelock.UnLock(_defaultUploadLockFile)
+					os.Exit(code)
+				default:
+					time.Sleep(10 * time.Millisecond)
+				}
+			}
 		},
 	}
 	cmd.Flags().SortFlags = false
@@ -110,8 +135,9 @@ func getImagesDownloadManifest(file string) ([]DownloadManifest, error) {
 	return dm, nil
 }
 
-func uploadImages(dm []DownloadManifest, required *sync.Map, completedc chan int) {
+func uploadImages(dm []DownloadManifest, completedc chan int) {
 	var wg sync.WaitGroup
+	var ums []*UploadManifest
 	log.Debugf("upload images with %d goroutines.", len(dm))
 	wg.Add(len(dm))
 	uiprogress.Start()
@@ -124,13 +150,13 @@ func uploadImages(dm []DownloadManifest, required *sync.Map, completedc chan int
 	}
 	wg.Wait()
 	log.Debug("upload images completed.")
-	err := generateDownloadManifest(dms)
+	err := generateUploadManifest(ums)
 	if err != nil {
 		log.Errorf("generate manifest %v.", err)
 	}
 	uiprogress.Stop()
-	fbr := checkFetchBlobsResult(dms)
-	completedc <- fbr
+	failed := checkUploadBlobsResult(ums)
+	completedc <- failed
 }
 
 func uploadLayersOfImage(m DownloadManifest, bar *uiprogress.Bar) *UploadManifest {
@@ -147,25 +173,26 @@ func uploadLayersOfImage(m DownloadManifest, bar *uiprogress.Bar) *UploadManifes
 			continue
 		}
 		wg.Add(1)
-		go func(l client.Layer, t string) {
+		go func(l LayerResponse) {
 			defer wg.Done()
-			err := c.FetchBlobs(mr.Manifest.Image.Name, l.Digest, t)
-			log.Debugf("fetch blobs %s of %s, status: %d, %s.", l.Digest, mr.Manifest.Image.Name, err.Code, err.Message)
-			lm.Layers = append(lm.Layers, LayerResponse{err, t})
+			err := uploadBlobs(m.Image, l)
+			log.Debugf("upload blobs %s of %s, status: %d, %s.", l.Target, m.Image.Name, err.Code, err.Message)
+			um.Layers = append(um.Layers, LayerResponse{err, l.Digest, l.Target})
 			bar.Incr()
-		}(l, target)
+		}(l)
 	}
 	wg.Wait()
-	return lm
+	return um
 }
 
-func uploadBlobs(m DownloadManifest) error {
-	result := c.StartUpload(m.Image.Name)
-	if result.Code != client.OK.Code {
-		return result
+func uploadBlobs(i client.ImageRepo, l LayerResponse) *client.Errno {
+	res := c.StartUpload(i.Name)
+	if res.Code != client.OK.Code {
+		return res
 	}
-
-	return nil
+	uuid := res.Message
+	res = c.PushBlobs(i.Name, l.Digest, uuid, l.Target)
+	return res
 }
 
 func checkImagesTagIsExists(name, tag string) bool {
@@ -187,4 +214,31 @@ func checkImagesLayerIsExists(name, digest string) bool {
 		return true
 	}
 	return false
+}
+
+func checkUploadBlobsResult(ums []*UploadManifest) int {
+	var failed int
+	for _, m := range ums {
+		if len(m.Layers) < 1 {
+			continue
+		}
+		for _, l := range m.Layers {
+			if l.Status.Code != client.OK.Code {
+				failed ++
+			}
+		}
+	}
+	return failed
+}
+
+func generateUploadManifest(ums []*UploadManifest) error {
+	j, err := json.Marshal(ums)
+	if err != nil {
+		return fmt.Errorf("unmarshal %v", err)
+	}
+	err = ioutil.WriteFile(filepath.Join(ImageDateFolderPath, _defaultUploadManifest), j, 777)
+	if err != nil {
+		return fmt.Errorf("write %v", err)
+	}
+	return nil
 }
