@@ -19,21 +19,33 @@ import (
 	"github.com/shipengqi/lighting-i/pkg/utils"
 )
 
+type UploadConfig struct {
+	Dir         string
+	User        string
+	Password    string
+	RetryTimes  int
+	Registry    string
+	Force       bool
+	Org         string
+	Overwrite   bool
+}
+
 type UploadManifest struct {
 	Layers []LayerResponse
 	Image  client.ImageRepo
 }
 
+var uploadConfig UploadConfig
+
 func addUploadFlags(flagSet *pflag.FlagSet) {
-	flagSet.StringVarP(&Conf.Registry, "registry", "r", "https://registry-1.docker.io", "The host of the registry.")
-	flagSet.StringVarP(&Conf.Org, "organization", "o", "", "Organization name of the images.")
-	flagSet.StringVarP(&Conf.Dir, "dir", "d", "", "Images tar directory path (required).")
-	flagSet.StringVarP(&Conf.User, "user", "u", "", "Registry account username.")
-	flagSet.StringVarP(&Conf.Password, "pass", "p", "", "Registry account password.")
-	flagSet.IntVarP(&Conf.RetryTimes, "retry", "t", 0, "The retry times when the image download fails.")
-	flagSet.BoolVarP(&Conf.AutoConfirm, "yes", "y", false, "Answer yes for any confirmations.")
-	flagSet.BoolVarP(&Conf.Force, "force", "f", false, "If true, ignore the process lock.")
-	flagSet.BoolVarP(&Conf.Overwrite, "overwrite", "w", false, "If true, overwrite the existing images on the registry.")
+	flagSet.StringVarP(&uploadConfig.Registry, "registry", "r", "https://registry-1.docker.io", "The host of the registry.")
+	flagSet.StringVarP(&uploadConfig.Org, "organization", "o", "", "Organization name of the images.")
+	flagSet.StringVarP(&uploadConfig.Dir, "dir", "d", "", "Images tar directory path (required).")
+	flagSet.StringVarP(&uploadConfig.User, "user", "u", "", "Registry account username.")
+	flagSet.StringVarP(&uploadConfig.Password, "pass", "p", "", "Registry account password.")
+	flagSet.IntVarP(&uploadConfig.RetryTimes, "retry", "t", 0, "The retry times when the image download fails.")
+	flagSet.BoolVarP(&uploadConfig.Force, "force", "f", false, "If true, ignore the process lock.")
+	flagSet.BoolVarP(&uploadConfig.Overwrite, "overwrite", "w", false, "If true, overwrite the existing images on the registry.")
 }
 
 func uploadCommand() *cobra.Command {
@@ -42,26 +54,32 @@ func uploadCommand() *cobra.Command {
 		Aliases: []string{_defaultUploadAlias},
 		Short:	"Upload docker images.",
 		PreRun: func(cmd *cobra.Command, args []string) {
-			if Conf.Dir == "" {
+			// Init Conf
+			Conf.RetryTimes = uploadConfig.RetryTimes
+			Conf.Registry = uploadConfig.Registry
+			Conf.User = uploadConfig.User
+			Conf.Password = uploadConfig.Password
+
+			if uploadConfig.Dir == "" {
 				fmt.Println("Images tar directory path is required, pleased use '--dir' or '-d'.")
 				os.Exit(1)
 			}
 
-			if !utils.PathIsExist(Conf.Dir) {
+			if !utils.PathIsExist(uploadConfig.Dir) {
 				fmt.Println("Images tar directory path is invalid.")
 				os.Exit(1)
 			}
 
-			if !utils.PathIsExist(filepath.Join(Conf.Dir, _defaultDownloadManifest)) {
+			if !utils.PathIsExist(filepath.Join(uploadConfig.Dir, _defaultDownloadManifest)) {
 				fmt.Println("'images.download.manifest' file is invalid.")
 				os.Exit(1)
 			}
 
-			ImageDateFolderPath = Conf.Dir
+			ImageDateFolderPath = uploadConfig.Dir
 			LogFilePath = filepath.Join(ImageDateFolderPath, _defaultUploadLog)
 			log.Init(LogFilePath)
 
-			if Conf.Force {
+			if uploadConfig.Force {
 				return
 			}
 
@@ -83,13 +101,13 @@ func uploadCommand() *cobra.Command {
 				return
 			}
 
-			dm, err := getImagesDownloadManifest(filepath.Join(Conf.Dir, _defaultDownloadManifest))
+			dm, err := getImagesDownloadManifest(filepath.Join(uploadConfig.Dir, _defaultDownloadManifest))
 			if err != nil {
 				log.Errorf("get manifest %v.", err)
 				return
 			}
 			log.Debug("read download manifest", dm)
-			log.Infof("Starting the upload the images to %s under %s ...", Conf.Org, ImageDateFolderPath)
+			log.Infof("Starting the upload the images to %s under %s ...", uploadConfig.Org, ImageDateFolderPath)
 
 			completedc := make(chan int, 1)
 			go uploadImages(dm, completedc)
@@ -100,7 +118,7 @@ func uploadCommand() *cobra.Command {
 				select {
 				case failed := <-completedc:
 					if failed < 1 {
-						log.Infof("Successfully upload the images to %s under %s .", Conf.Org, ImageDateFolderPath)
+						log.Infof("Successfully upload the images to %s under %s .", uploadConfig.Org, ImageDateFolderPath)
 					} else {
 						log.Errorf("Upload images with %d error(s).", failed)
 					}
@@ -162,7 +180,7 @@ func uploadImages(dm []DownloadManifest, completedc chan int) {
 func uploadLayersOfImage(m DownloadManifest, bar *uiprogress.Bar) *UploadManifest {
 	var wg sync.WaitGroup
 	um := &UploadManifest{Image: m.Image}
-	if !Conf.Overwrite && checkImagesTagIsExists(m.Image.Name, m.Image.Tag) {
+	if !uploadConfig.Overwrite && checkImagesTagIsExists(m.Image.Name, m.Image.Tag) {
 		_ = bar.Set(bar.Total)
 		return um
 	}

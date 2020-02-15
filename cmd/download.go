@@ -27,6 +27,16 @@ var (
 	_defaultProgressTitleWidth = 30
 )
 
+type DownloadConfig struct {
+	Dir         string
+	User        string
+	Password    string
+	RetryTimes  int
+	Registry    string
+	Force       bool
+	ImagesSet   string
+}
+
 type ManifestResponse struct {
 	Status   *client.Errno
 	Manifest *client.Manifest
@@ -56,15 +66,16 @@ type DownloadManifest struct {
 	Image  client.ImageRepo
 }
 
+var downloadConfig DownloadConfig
+
 func addDownloadFlags(flagSet *pflag.FlagSet) {
-	flagSet.StringVarP(&Conf.Registry, "registry", "r", "https://registry-1.docker.io", "The host of the registry.")
-	flagSet.StringVarP(&Conf.ImagesSet, "image-set", "i", _defaultImageSet, "Images set file path.")
-	flagSet.StringVarP(&Conf.User, "user", "u", "", "Registry account username.")
-	flagSet.StringVarP(&Conf.Password, "pass", "p", "", "Registry account password.")
-	flagSet.IntVarP(&Conf.RetryTimes, "retry", "t", 0, "The retry times when the image download fails.")
-	flagSet.StringVarP(&Conf.Dir, "dir", "d", _defaultImagesDir, "Images tar directory path.")
-	flagSet.BoolVarP(&Conf.AutoConfirm, "yes", "y", false, "Answer yes for any confirmations.")
-	flagSet.BoolVarP(&Conf.Force, "force", "f", false, "If true, ignore the process lock.")
+	flagSet.StringVarP(&downloadConfig.Registry, "registry", "r", "https://registry-1.docker.io", "The host of the registry.")
+	flagSet.StringVarP(&downloadConfig.ImagesSet, "image-set", "i", _defaultImageSet, "Images set file path.")
+	flagSet.StringVarP(&downloadConfig.User, "user", "u", "", "Registry account username.")
+	flagSet.StringVarP(&downloadConfig.Password, "pass", "p", "", "Registry account password.")
+	flagSet.IntVarP(&downloadConfig.RetryTimes, "retry", "t", 0, "The retry times when the image download fails.")
+	flagSet.StringVarP(&downloadConfig.Dir, "dir", "d", _defaultImagesDir,"Images tar directory path.")
+	flagSet.BoolVarP(&downloadConfig.Force, "force", "f", false, "If true, ignore the process lock.")
 }
 
 func downloadCommand() *cobra.Command {
@@ -73,8 +84,13 @@ func downloadCommand() *cobra.Command {
 		Aliases: []string{_defaultDownloadAlias},
 		Short: "Download docker images.",
 		PreRun: func(cmd *cobra.Command, args []string) {
+			// Init Conf
+			Conf.RetryTimes = downloadConfig.RetryTimes
+			Conf.Registry = downloadConfig.Registry
+			Conf.User = downloadConfig.User
+			Conf.Password = downloadConfig.Password
 			// Create required dir and create download directory by date
-			folderPath, err := initDir(Conf.Dir)
+			folderPath, err := initDir(downloadConfig.Dir)
 			if err != nil {
 				fmt.Printf("mkdir %v", err)
 				os.Exit(1)
@@ -83,8 +99,12 @@ func downloadCommand() *cobra.Command {
 
 			LogFilePath = filepath.Join(ImageDateFolderPath, _defaultDownloadLog)
 			log.Init(LogFilePath)
+			log.Debugf("Init directory: %s", downloadConfig.Dir)
+			log.Debugf("Init download directory: %s", ImageDateFolderPath)
+			log.Debugf("Init log file: %s", LogFilePath)
+			log.Debugf("Using image set file: %s", downloadConfig.ImagesSet)
 
-			if Conf.Force {
+			if downloadConfig.Force {
 				return
 			}
 
@@ -99,8 +119,8 @@ func downloadCommand() *cobra.Command {
 				log.Infof("You can refer to %s for more detail.", LogFilePath)
 				filelock.UnLock(_defaultDownloadLockFile)
 			}()
-			if !checkImageSet(Conf.ImagesSet) {
-				log.Errorf("%s is not exists.", Conf.ImagesSet)
+			if !checkImageSet(downloadConfig.ImagesSet) {
+				log.Errorf("%s is not exists.", downloadConfig.ImagesSet)
 				return
 			}
 			err := initClient()
@@ -109,7 +129,7 @@ func downloadCommand() *cobra.Command {
 				return
 			}
 
-			imageSet, err := images.GetImagesFromSet(Conf.ImagesSet)
+			imageSet, err := images.GetImagesFromSet(downloadConfig.ImagesSet)
 			if err != nil {
 				log.Errorf("get images %v.", err)
 				return

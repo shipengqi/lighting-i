@@ -41,18 +41,10 @@ var LogFilePath string
 var c *client.Client
 
 type Config struct {
-	AutoConfirm bool
-	Dir         string
 	User        string
 	Password    string
 	RetryTimes  int
 	Registry    string
-	Key         string
-	Force       bool
-
-	Org         string
-	ImagesSet   string
-	Overwrite   bool
 }
 
 func NewLightingCommand() *cobra.Command {
